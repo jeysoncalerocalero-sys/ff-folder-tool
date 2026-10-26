@@ -1,2 +1,0 @@
-Aqui van los archivos que quieras copiar a la carpeta de Free Fire.
-Reemplaza este archivo por los tuyos (.cfg, .json, .lua, lo que sea).
