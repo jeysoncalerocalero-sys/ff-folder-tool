@@ -44,6 +44,8 @@ jobs:
           mkdir -p app/src/main/java/com/fftool
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
           mkdir -p app/src/main/assets/ff
 
           SRC="$(find . -path '*/assets/ff' -type d -not -path './.git/*' | head -n1)"
@@ -98,8 +100,8 @@ jobs:
                   applicationId = "com.fftool"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 4
-                  versionName = "4.0"
+                  versionCode = 5
+                  versionName = "5.0"
               }
 
               buildTypes {
@@ -136,6 +138,8 @@ jobs:
               <application
                   android:name=".App"
                   android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
                   android:label="@string/app_name"
                   android:supportsRtl="true"
                   android:theme="@style/Theme.AppCompat.NoActionBar">
@@ -181,6 +185,13 @@ jobs:
           </manifest>
           EOF
 
+          cat > app/src/main/res/values/colors.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#0E0E12</color>
+          </resources>
+          EOF
+
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -208,6 +219,64 @@ jobs:
               android:summary="@string/a11y_desc" />
           EOF
 
+          cat > app/src/main/res/drawable/ic_launcher_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#0E0E12"
+                  android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+              <path
+                  android:fillColor="#1A0A0C"
+                  android:pathData="M54,10 A44,44 0 1,0 54,98 A44,44 0 1,0 54,10 Z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+
+              <path
+                  android:pathData="M54,26 A28,28 0 1,0 54,82 A28,28 0 1,0 54,26 Z"
+                  android:strokeColor="#FF3B30"
+                  android:strokeWidth="6"
+                  android:fillColor="#00000000" />
+
+              <path
+                  android:pathData="M54,34 L54,74 M34,54 L74,54"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeWidth="5"
+                  android:strokeLineCap="round" />
+
+              <path
+                  android:pathData="M54,47 A7,7 0 1,0 54,61 A7,7 0 1,0 54,47 Z"
+                  android:fillColor="#FF3B30" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
           cat > app/src/main/java/com/fftool/App.kt <<'EOF'
           package com.fftool
 
@@ -219,7 +288,7 @@ jobs:
                   Config.init(this)
                   Logs.init(this)
                   CrashHandler.install()
-                  Logs.event("app iniciada v4")
+                  Logs.event("app iniciada v5")
               }
           }
           EOF
@@ -312,7 +381,6 @@ jobs:
           object Config {
 
               private const val PREFS = "ff_promax_prefs"
-
               private var sp: SharedPreferences? = null
 
               fun init(ctx: Context) {
@@ -324,9 +392,9 @@ jobs:
               private val p: SharedPreferences
                   get() = sp ?: throw IllegalStateException("Config.init no llamado")
 
-              private fun edit(block: (SharedPreferences.Editor) -> Unit) {
+              private fun edit(b: (SharedPreferences.Editor) -> Unit) {
                   val e = p.edit()
-                  block(e)
+                  b(e)
                   e.apply()
               }
 
@@ -334,56 +402,88 @@ jobs:
                   get() = p.getBoolean("enabled", true)
                   set(v) = edit { it.putBoolean("enabled", v) }
 
-              var redMin: Int
-                  get() = p.getInt("redMin", 110)
-                  set(v) = edit { it.putInt("redMin", v.coerceIn(60, 250)) }
+              var verZona: Boolean
+                  get() = p.getBoolean("verZona", true)
+                  set(v) = edit { it.putBoolean("verZona", v) }
 
-              var minPixels: Int
-                  get() = p.getInt("minPixels", 5)
-                  set(v) = edit { it.putInt("minPixels", v.coerceIn(2, 400)) }
-
-              var regionHalf: Int
-                  get() = p.getInt("regionHalf", 30)
-                  set(v) = edit { it.putInt("regionHalf", v.coerceIn(6, 200)) }
-
-              var fireIntervalMs: Long
-                  get() = p.getLong("fireIntervalMs", 40L)
-                  set(v) = edit { it.putLong("fireIntervalMs", v.coerceIn(16L, 400L)) }
-
-              var tapMs: Long
-                  get() = p.getLong("tapMs", 25L)
-                  set(v) = edit { it.putLong("tapMs", v.coerceIn(8L, 120L)) }
+              var modoSostener: Boolean
+                  get() = p.getBoolean("modoSostener", false)
+                  set(v) = edit { it.putBoolean("modoSostener", v) }
 
               var headFlick: Boolean
                   get() = p.getBoolean("headFlick", false)
                   set(v) = edit { it.putBoolean("headFlick", v) }
 
-              var flickPx: Int
-                  get() = p.getInt("flickPx", 180)
-                  set(v) = edit { it.putInt("flickPx", v.coerceIn(40, 900)) }
+              var rojo: Int
+                  get() = p.getInt("rojo", 115)
+                  set(v) = edit { it.putInt("rojo", v.coerceIn(60, 250)) }
 
-              var flickMs: Long
-                  get() = p.getLong("flickMs", 60L)
-                  set(v) = edit { it.putLong("flickMs", v.coerceIn(20L, 250L)) }
+              var punto: Int
+                  get() = p.getInt("punto", 5)
+                  set(v) = edit { it.putInt("punto", v.coerceIn(2, 400)) }
+
+              var zona: Int
+                  get() = p.getInt("zona", 80)
+                  set(v) = edit { it.putInt("zona", v.coerceIn(20, 400)) }
+
+              var retardo: Long
+                  get() = p.getLong("retardo", 110L)
+                  set(v) = edit { it.putLong("retardo", v.coerceIn(16L, 800L)) }
+
+              var tapMs: Long
+                  get() = p.getLong("tapMs", 22L)
+                  set(v) = edit { it.putLong("tapMs", v.coerceIn(8L, 600L)) }
+
+              var head: Int
+                  get() = p.getInt("head", 180)
+                  set(v) = edit { it.putInt("head", v.coerceIn(40, 900)) }
 
               var offsetX: Int
                   get() = p.getInt("offsetX", 0)
-                  set(v) = edit { it.putInt("offsetX", v.coerceIn(-200, 200)) }
+                  set(v) = edit { it.putInt("offsetX", v.coerceIn(-300, 300)) }
 
               var offsetY: Int
                   get() = p.getInt("offsetY", 0)
-                  set(v) = edit { it.putInt("offsetY", v.coerceIn(-200, 200)) }
+                  set(v) = edit { it.putInt("offsetY", v.coerceIn(-300, 300)) }
+
+              fun presetSuave() {
+                  enabled = true
+                  modoSostener = false
+                  headFlick = false
+                  rojo = 135
+                  punto = 9
+                  zona = 60
+                  retardo = 170L
+                  tapMs = 25L
+                  head = 160
+                  offsetX = 0
+                  offsetY = 0
+              }
+
+              fun presetNormal() {
+                  enabled = true
+                  modoSostener = false
+                  headFlick = false
+                  rojo = 115
+                  punto = 5
+                  zona = 80
+                  retardo = 110L
+                  tapMs = 22L
+                  head = 180
+                  offsetX = 0
+                  offsetY = 0
+              }
 
               fun presetDuro() {
                   enabled = true
+                  modoSostener = false
                   headFlick = true
-                  redMin = 115
-                  minPixels = 5
-                  regionHalf = 46
-                  fireIntervalMs = 22L
-                  tapMs = 18L
-                  flickPx = 300
-                  flickMs = 45L
+                  rojo = 108
+                  punto = 4
+                  zona = 110
+                  retardo = 50L
+                  tapMs = 20L
+                  head = 260
                   offsetX = 0
                   offsetY = 0
               }
@@ -419,7 +519,7 @@ jobs:
                   super.onDestroy()
               }
 
-              fun tap(x: Float, y: Float, ms: Long, then: (() -> Unit)? = null) {
+              fun press(x: Float, y: Float, ms: Long, then: (() -> Unit)? = null) {
                   val path = Path().apply { moveTo(x, y) }
                   send(path, ms.coerceAtLeast(8L), then)
               }
@@ -540,10 +640,8 @@ jobs:
                       codigo = c
                       datos = d
                       intentos = 0
-                      Logs.event("onStartCommand con permiso, esperando para abrir proyeccion")
+                      Logs.event("onStartCommand con permiso")
                       ui.postDelayed({ abrirProyeccion() }, 400L)
-                  } else {
-                      Logs.event("onStartCommand sin datos (reinicio del sistema)")
                   }
                   return START_STICKY
               }
@@ -555,7 +653,7 @@ jobs:
                       Logs.event("proyeccion lista " + screenW + "x" + screenH)
                   } catch (t: Throwable) {
                       intentos++
-                      Logs.event("abrirProyeccion fallo intento " + intentos + ": " + t.javaClass.simpleName + ": " + t.message)
+                      Logs.event("proyeccion fallo intento " + intentos + ": " + t.javaClass.simpleName + ": " + t.message)
                       if (intentos < 5) {
                           ui.postDelayed({ abrirProyeccion() }, 800L)
                       } else {
@@ -617,7 +715,7 @@ jobs:
 
                   proj.registerCallback(object : MediaProjection.Callback() {
                       override fun onStop() {
-                          Logs.event("proyeccion revocada por el sistema")
+                          Logs.event("proyeccion revocada")
                           stopProjection()
                       }
                   }, ui)
@@ -654,7 +752,7 @@ jobs:
                       if (!Config.enabled) return
                       if (busy.get()) return
                       val ahora = SystemClock.uptimeMillis()
-                      if (ahora - lastFire < Config.fireIntervalMs) return
+                      if (ahora - lastFire < Config.retardo) return
 
                       val plane = image.planes[0]
                       val buf = plane.buffer
@@ -665,14 +763,14 @@ jobs:
 
                       val cx = w / 2
                       val cy = h / 2
-                      val half = Config.regionHalf
+                      val half = (Config.zona / scale).coerceAtLeast(2)
                       val left = (cx - half).coerceAtLeast(0)
                       val top = (cy - half).coerceAtLeast(0)
                       val right = (cx + half).coerceAtMost(w - 1)
                       val bottom = (cy + half).coerceAtMost(h - 1)
 
-                      val redMin = Config.redMin
-                      val maxOtros = redMin * 60 / 100
+                      val redMin = Config.rojo
+                      val maxOtros = redMin * 62 / 100
 
                       val fila = ByteArray(rowStride)
                       var sx = 0
@@ -706,9 +804,9 @@ jobs:
                       }
 
                       frames++
-                      if (frames == 1) Logs.event("primer frame " + w + "x" + h + " stride " + rowStride + " pix " + pixStride)
+                      if (frames == 1) Logs.event("primer frame " + w + "x" + h)
 
-                      if (n >= Config.minPixels) {
+                      if (n >= Config.punto) {
                           val bx = sx / n
                           val by = sy / n
                           fire((bx.toFloat() * scale) + Config.offsetX, (by.toFloat() * scale) + Config.offsetY)
@@ -716,7 +814,7 @@ jobs:
                   } catch (t: Throwable) {
                       erroresFrame++
                       if (erroresFrame <= 5) {
-                          Logs.event("error en frame: " + t.javaClass.simpleName + ": " + t.message)
+                          Logs.event("error frame: " + t.javaClass.simpleName + ": " + t.message)
                       }
                   } finally {
                       try {
@@ -731,15 +829,17 @@ jobs:
                   if (!busy.compareAndSet(false, true)) return
                   lastFire = SystemClock.uptimeMillis()
 
+                  val mantengo = if (Config.modoSostener) Config.retardo else Config.tapMs
+
                   if (Config.headFlick) {
-                      svc.flick(x, y, 0f, -Config.flickPx.toFloat(), Config.flickMs) {
-                          svc.tap(x, y, Config.tapMs) { busy.set(false) }
+                      svc.flick(x, y, 0f, -Config.head.toFloat(), 45L) {
+                          svc.press(x, y, mantengo) { busy.set(false) }
                       }
                   } else {
-                      svc.tap(x, y, Config.tapMs) { busy.set(false) }
+                      svc.press(x, y, mantengo) { busy.set(false) }
                   }
 
-                  ui.postDelayed({ busy.set(false) }, 400L)
+                  ui.postDelayed({ busy.set(false) }, mantengo + 250L)
               }
 
               private fun stopProjection() {
@@ -804,13 +904,16 @@ jobs:
           import android.graphics.Color
           import android.graphics.PixelFormat
           import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
           import android.os.Build
           import android.os.Handler
           import android.os.IBinder
           import android.os.Looper
           import android.provider.Settings
+          import android.util.DisplayMetrics
           import android.view.Gravity
           import android.view.MotionEvent
+          import android.view.View
           import android.view.WindowManager
           import android.widget.LinearLayout
           import android.widget.TextView
@@ -819,16 +922,25 @@ jobs:
 
               private var wm: WindowManager? = null
               private var panel: LinearLayout? = null
+              private var zonaView: View? = null
+              private var zonaParams: WindowManager.LayoutParams? = null
+
               private lateinit var estado: TextView
+              private lateinit var ajustes: LinearLayout
+              private lateinit var modoBtn: TextView
+              private val filas = HashMap<String, TextView>()
+              private var abierto = false
+
               private val ui = Handler(Looper.getMainLooper())
 
               private val tick = object : Runnable {
                   override fun run() {
                       try {
                           render()
+                          refrescarZona()
                       } catch (t: Throwable) {
                       }
-                      ui.postDelayed(this, 600)
+                      ui.postDelayed(this, 700)
                   }
               }
 
@@ -837,10 +949,11 @@ jobs:
               override fun onCreate() {
                   super.onCreate()
                   Config.init(this)
-                  Logs.event("panel flotante creado")
+                  Logs.event("panel creado")
                   wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   try {
                       build()
+                      crearZona()
                   } catch (t: Throwable) {
                       Logs.event("panel fallo: " + t.javaClass.simpleName + ": " + t.message)
                       Logs.crash(t)
@@ -855,42 +968,92 @@ jobs:
 
               override fun onDestroy() {
                   ui.removeCallbacks(tick)
-                  panel?.let {
-                      try {
-                          wm?.removeView(it)
-                      } catch (t: Throwable) {
-                      }
+                  try {
+                      panel?.let { wm?.removeView(it) }
+                  } catch (t: Throwable) {
+                  }
+                  try {
+                      zonaView?.let { wm?.removeView(it) }
+                  } catch (t: Throwable) {
                   }
                   panel = null
+                  zonaView = null
                   running = false
-                  Logs.event("panel flotante cerrado")
+                  Logs.event("panel cerrado")
                   super.onDestroy()
               }
 
               private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+              private fun boton(label: String, accion: () -> Unit): TextView {
+                  return TextView(this).apply {
+                      text = label
+                      setTextColor(Color.WHITE)
+                      textSize = 10f
+                      gravity = Gravity.CENTER
+                      setPadding(0, dp(6), 0, dp(6))
+                      setBackgroundColor(0xFF23232E.toInt())
+                      setOnClickListener { accion() }
+                  }
+              }
+
+              private fun fila(label: String, valor: () -> Int, menos: () -> Unit, mas: () -> Unit): LinearLayout {
+                  val row = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+                  val lbl = TextView(this).apply {
+                      text = label + " " + valor()
+                      setTextColor(0xFFBBBBBB.toInt())
+                      textSize = 9f
+                      setPadding(dp(3), 0, dp(3), 0)
+                  }
+                  filas[label] = lbl
+                  row.addView(lbl, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+                  val bm = TextView(this).apply {
+                      text = "-"
+                      setTextColor(Color.WHITE)
+                      textSize = 12f
+                      gravity = Gravity.CENTER
+                      setBackgroundColor(0xFF2E2E3A.toInt())
+                      setOnClickListener { menos(); render() }
+                  }
+                  val bp = TextView(this).apply {
+                      text = "+"
+                      setTextColor(Color.WHITE)
+                      textSize = 12f
+                      gravity = Gravity.CENTER
+                      setBackgroundColor(0xFF2E2E3A.toInt())
+                      setOnClickListener { mas(); render() }
+                  }
+                  row.addView(bm, LinearLayout.LayoutParams(dp(26), dp(24)))
+                  row.addView(bp, LinearLayout.LayoutParams(dp(26), dp(24)))
+                  return row
+              }
+
               private fun build() {
                   val col = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      setPadding(dp(10), dp(10), dp(10), dp(10))
-                      setBackgroundColor(0xCC14141C.toInt())
+                      setPadding(dp(7), dp(7), dp(7), dp(7))
+                      setBackgroundColor(0xE6101014.toInt())
                   }
 
                   val head = TextView(this).apply {
                       text = "FF PRO MAX"
                       setTextColor(0xFFFF3B30.toInt())
-                      textSize = 13f
+                      textSize = 12f
                       typeface = Typeface.DEFAULT_BOLD
                       gravity = Gravity.CENTER
-                      setPadding(0, 0, 0, dp(6))
+                      setPadding(0, dp(3), 0, dp(3))
                   }
                   col.addView(head)
 
                   estado = TextView(this).apply {
-                      setTextColor(Color.WHITE)
-                      textSize = 10f
+                      setTextColor(0xFF9AE6B4.toInt())
+                      textSize = 9f
                       gravity = Gravity.CENTER
-                      setPadding(0, 0, 0, dp(6))
+                      setPadding(0, 0, 0, dp(5))
                   }
                   col.addView(estado)
 
@@ -898,20 +1061,45 @@ jobs:
                       Config.enabled = !Config.enabled
                       render()
                   })
-                  col.addView(boton("DURO") {
-                      Config.presetDuro()
-                      render()
+                  col.addView(boton("SUAVE") { Config.presetSuave(); render() })
+                  col.addView(boton("NORMAL") { Config.presetNormal(); render() })
+                  col.addView(boton("DURO") { Config.presetDuro(); render() })
+                  col.addView(boton("VER ZONA") { Config.verZona = !Config.verZona; render() })
+                  col.addView(boton("AJUSTES") {
+                      abierto = !abierto
+                      ajustes.visibility = if (abierto) View.VISIBLE else View.GONE
                   })
-                  col.addView(boton("HEAD FLICK") {
+
+                  ajustes = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      visibility = View.GONE
+                  }
+                  ajustes.addView(fila("RETARDO", { Config.retardo.toInt() }, { Config.retardo -= 15 }, { Config.retardo += 15 }))
+                  ajustes.addView(fila("ROJO", { Config.rojo }, { Config.rojo -= 5 }, { Config.rojo += 5 }))
+                  ajustes.addView(fila("PUNTO", { Config.punto }, { Config.punto -= 1 }, { Config.punto += 1 }))
+                  ajustes.addView(fila("ZONA", { Config.zona }, { Config.zona -= 10 }, { Config.zona += 10 }))
+                  ajustes.addView(fila("TAP", { Config.tapMs.toInt() }, { Config.tapMs -= 4 }, { Config.tapMs += 4 }))
+                  ajustes.addView(fila("HEAD", { Config.head }, { Config.head -= 20 }, { Config.head += 20 }))
+                  ajustes.addView(fila("OFF X", { Config.offsetX }, { Config.offsetX -= 4 }, { Config.offsetX += 4 }))
+                  ajustes.addView(fila("OFF Y", { Config.offsetY }, { Config.offsetY -= 4 }, { Config.offsetY += 4 }))
+
+                  modoBtn = boton("MODO: TOQUES") {
+                      Config.modoSostener = !Config.modoSostener
+                      render()
+                  }
+                  ajustes.addView(modoBtn)
+
+                  ajustes.addView(boton("HEAD FLICK") {
                       Config.headFlick = !Config.headFlick
                       render()
                   })
-                  col.addView(boton("MAS SENSIBLE +") { ajustar(1) })
-                  col.addView(boton("MENOS -") { ajustar(-1) })
+
+                  col.addView(ajustes)
+
                   col.addView(boton("CERRAR PANEL") { stopSelf() })
 
                   val params = WindowManager.LayoutParams(
-                      dp(104),
+                      dp(126),
                       WindowManager.LayoutParams.WRAP_CONTENT,
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                           WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -921,8 +1109,8 @@ jobs:
                       PixelFormat.TRANSLUCENT
                   ).apply {
                       gravity = Gravity.TOP or Gravity.START
-                      x = dp(8)
-                      y = dp(140)
+                      x = dp(6)
+                      y = dp(90)
                   }
 
                   var dx = 0f
@@ -952,22 +1140,68 @@ jobs:
                   render()
               }
 
-              private fun boton(label: String, accion: () -> Unit): TextView {
-                  return TextView(this).apply {
-                      text = label
-                      setTextColor(Color.WHITE)
-                      textSize = 11f
-                      gravity = Gravity.CENTER
-                      setPadding(0, dp(7), 0, dp(7))
-                      setBackgroundColor(0xFF23232E.toInt())
-                      setOnClickListener { accion() }
+              private fun crearZona() {
+                  if (zonaView != null) return
+                  val v = View(this).apply {
+                      background = GradientDrawable().apply {
+                          setColor(0x00000000)
+                          setStroke(dp(2), 0xFF00E5FF.toInt())
+                          cornerRadius = dp(6).toFloat()
+                      }
                   }
+                  val p = WindowManager.LayoutParams(
+                      dp(160),
+                      dp(160),
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      else
+                          WindowManager.LayoutParams.TYPE_PHONE,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                  }
+                  zonaParams = p
+                  zonaView = v
+                  wm?.addView(v, p)
               }
 
-              private fun ajustar(dir: Int) {
-                  Config.redMin = Config.redMin - (8 * dir)
-                  Config.minPixels = Config.minPixels - dir
-                  render()
+              @Suppress("DEPRECATION")
+              private fun pantalla(): Pair<Int, Int> {
+                  val wm2 = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                      val b = wm2.currentWindowMetrics.bounds
+                      return b.width() to b.height()
+                  }
+                  val dm = DisplayMetrics()
+                  wm2.defaultDisplay.getRealMetrics(dm)
+                  return dm.widthPixels to dm.heightPixels
+              }
+
+              private fun refrescarZona() {
+                  val v = zonaView ?: return
+                  val p = zonaParams ?: return
+
+                  if (!Config.verZona) {
+                      if (v.visibility != View.GONE) v.visibility = View.GONE
+                      return
+                  }
+                  if (v.visibility != View.VISIBLE) v.visibility = View.VISIBLE
+
+                  val size = (Config.zona * 2).coerceAtLeast(20)
+                  if (p.width != size || p.height != size) {
+                      p.width = size
+                      p.height = size
+                  }
+                  val (sw, sh) = pantalla()
+                  p.x = (sw / 2 + Config.offsetX) - size / 2
+                  p.y = (sh / 2 + Config.offsetY) - size / 2
+                  try {
+                      wm?.updateViewLayout(v, p)
+                  } catch (t: Throwable) {
+                  }
               }
 
               private fun render() {
@@ -976,8 +1210,18 @@ jobs:
                       TouchAccessibilityService.ready() -> "ACTIVO"
                       else -> "FALTA ACCESIBILIDAD"
                   }
-                  val hf = if (Config.headFlick) "HEAD " + Config.flickPx + "px" else "HEAD off"
-                  estado.text = st + "\nrojo " + Config.redMin + " · " + Config.minPixels + "px\nzona " + Config.regionHalf + "\ncadencia " + Config.fireIntervalMs + "ms\n" + hf
+                  estado.text = st + "\nrojo " + Config.rojo + " · punto " + Config.punto + "\nzona " + Config.zona + " · retardo " + Config.retardo + "ms\n" + (if (Config.headFlick) "HEAD " + Config.head + "px" else "HEAD off")
+
+                  filas["RETARDO"]?.text = "RETARDO " + Config.retardo
+                  filas["ROJO"]?.text = "ROJO " + Config.rojo
+                  filas["PUNTO"]?.text = "PUNTO " + Config.punto
+                  filas["ZONA"]?.text = "ZONA " + Config.zona
+                  filas["TAP"]?.text = "TAP " + Config.tapMs
+                  filas["HEAD"]?.text = "HEAD " + Config.head
+                  filas["OFF X"]?.text = "OFF X " + Config.offsetX
+                  filas["OFF Y"]?.text = "OFF Y " + Config.offsetY
+
+                  modoBtn.text = if (Config.modoSostener) "MODO: SOSTENER" else "MODO: TOQUES"
               }
 
               companion object {
@@ -988,7 +1232,7 @@ jobs:
 
                   fun show(ctx: Context) {
                       if (!Settings.canDrawOverlays(ctx)) {
-                          Logs.event("no se puede mostrar panel: falta permiso")
+                          Logs.event("sin permiso de superposicion")
                           return
                       }
                       running = true
@@ -1050,7 +1294,6 @@ jobs:
                           OverlayService.show(this)
                           toast("PRO MAX activo. Abre Free Fire.")
                       } else {
-                          Logs.event("permiso de captura denegado")
                           toast("Permiso de captura denegado")
                       }
                       render()
@@ -1100,6 +1343,16 @@ jobs:
                   }
               }
 
+              private fun preset(label: String, color: Int, accion: () -> Unit): Button {
+                  return Button(this).apply {
+                      text = label
+                      textSize = 15f
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(color)
+                      setOnClickListener { accion(); render() }
+                  }
+              }
+
               private fun buildUi(): ScrollView {
                   val col = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
@@ -1116,11 +1369,11 @@ jobs:
                   }, lp(matchW = true, h = dp(50)))
 
                   col.addView(TextView(this).apply {
-                      text = "v4 · trigger anti ban + herramientas de carpeta"
+                      text = "v5 · control fino + zona visible"
                       setTextColor(0xFFAAAAAA.toInt())
                       textSize = 12f
                       gravity = Gravity.CENTER
-                      setPadding(0, 0, 0, dp(16))
+                      setPadding(0, 0, 0, dp(14))
                   })
 
                   status = TextView(this).apply {
@@ -1158,18 +1411,28 @@ jobs:
                       setOnClickListener { requestCapture() }
                   }, lp(matchW = true, h = dp(56), top = dp(16), bottom = dp(10)))
 
-                  col.addView(Button(this).apply {
-                      text = "MODO PEGAR DURO"
-                      textSize = 16f
-                      setTextColor(Color.WHITE)
-                      setBackgroundColor(0xFFB00020.toInt())
-                      setOnClickListener {
-                          Config.presetDuro()
-                          Logs.event("modo duro activado")
-                          toast("Modo agresivo: cadencia 22ms, flick 300px")
-                          render()
-                      }
-                  }, lp(matchW = true, h = dp(52), bottom = dp(10)))
+                  col.addView(TextView(this).apply {
+                      text = "PERFILES (también están en el panel flotante)"
+                      setTextColor(0xFF66FF99.toInt())
+                      textSize = 13f
+                      typeface = Typeface.DEFAULT_BOLD
+                      setPadding(0, dp(10), 0, dp(6))
+                  })
+
+                  col.addView(preset("SUAVE · 6 disparos por segundo", 0xFF2E7D32.toInt()) {
+                      Config.presetSuave()
+                      toast("Perfil suave")
+                  }, lp(matchW = true, h = dp(48), bottom = dp(8)))
+
+                  col.addView(preset("NORMAL · 9 disparos por segundo", 0xFF1565C0.toInt()) {
+                      Config.presetNormal()
+                      toast("Perfil normal")
+                  }, lp(matchW = true, h = dp(48), bottom = dp(8)))
+
+                  col.addView(preset("DURO · 20 disparos + head flick", 0xFFB00020.toInt()) {
+                      Config.presetDuro()
+                      toast("Perfil duro")
+                  }, lp(matchW = true, h = dp(48), bottom = dp(8)))
 
                   col.addView(Button(this).apply {
                       text = "DETENER"
@@ -1183,10 +1446,10 @@ jobs:
                           toast("Detenido")
                           render()
                       }
-                  }, lp(matchW = true, h = dp(50)))
+                  }, lp(matchW = true, h = dp(50), top = dp(8)))
 
                   col.addView(TextView(this).apply {
-                      text = "DIAGNOSTICO (toca para copiar)"
+                      text = "DIAGNOSTICO (seleccionable)"
                       setTextColor(0xFF66FF99.toInt())
                       textSize = 13f
                       setTypeface(Typeface.DEFAULT_BOLD)
@@ -1216,7 +1479,7 @@ jobs:
                   val ov = if (Settings.canDrawOverlays(this)) "OK" else "FALTA"
                   val ac = if (TouchAccessibilityService.ready()) "OK" else "FALTA"
                   val cap = if (Config.enabled) "ACTIVO" else "PAUSA"
-                  status.text = "Superposición: $ov\nAccesibilidad: $ac\nEstado: $cap\n\nrojo ${Config.redMin} · ${Config.minPixels}px · zona ${Config.regionHalf}\ncadencia ${Config.fireIntervalMs}ms · tap ${Config.tapMs}ms\n${if (Config.headFlick) "HeadFlick ON ${Config.flickPx}px" else "HeadFlick OFF"}"
+                  status.text = "Superposición: $ov\nAccesibilidad: $ac\nEstado: $cap\n\nrojo ${Config.rojo} · punto ${Config.punto} · zona ${Config.zona}\nretardo ${Config.retardo}ms · tap ${Config.tapMs}ms\n${if (Config.headFlick) "HeadFlick ON ${Config.head}px" else "HeadFlick OFF"}\n${if (Config.modoSostener) "Modo: SOSTENER" else "Modo: TOQUES"}"
 
                   val err = Logs.leer("ultimo_error.txt").trim()
                   val ev = Logs.leer("eventos.txt").trim().lines().takeLast(14).joinToString("\n")
@@ -1561,7 +1824,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FF-PRO-MAX-v4
+          name: FF-PRO-MAX-v5
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: warn
 
@@ -1570,9 +1833,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk FF-PRO-MAX-v4.apk
-          if gh release view v4 > /dev/null 2>&1; then
-            gh release upload v4 FF-PRO-MAX-v4.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk FF-PRO-MAX-v5.apk
+          if gh release view v5 > /dev/null 2>&1; then
+            gh release upload v5 FF-PRO-MAX-v5.apk --clobber
           else
-            gh release create v4 FF-PRO-MAX-v4.apk --title "FF PRO MAX 4.0" --notes "Con diagnostico de errores en pantalla."
+            gh release create v5 FF-PRO-MAX-v5.apk --title "FF PRO MAX 5.0" --notes "Control fino, zona visible y logo."
           fi
