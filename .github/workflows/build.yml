@@ -24,14 +24,30 @@ jobs:
 
       - name: Diagnostico
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls "$ANDROID_HOME/platforms" || true
-          ls "$ANDROID_HOME/build-tools" || true
-          echo "=== ARCHIVOS DEL REPO ==="
+          echo "=== GRADLE ==="
+          which gradle
+          gradle --version
+          echo "=== ANDROID_HOME ==="
+          echo "$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
+          echo "=== ARBOL DEL REPO ==="
           ls -R
+          echo "=== ARCHIVOS CLAVE ==="
+          for f in settings.gradle.kts build.gradle.kts gradle.properties app/build.gradle.kts app/src/main/AndroidManifest.xml; do
+            echo "----- $f -----"
+            cat "$f" 2>/dev/null || echo "NO EXISTE"
+          done
 
       - name: Compilar APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          set +e
+          gradle assembleDebug --stacktrace > /tmp/build.log 2>&1
+          code=$?
+          set -e
+          echo "############ CABECERA DEL ERROR ############"
+          head -n 80 /tmp/build.log
+          echo "############ FIN DE LA CABECERA ############"
+          exit $code
 
       - name: Subir APK
         uses: actions/upload-artifact@v4
