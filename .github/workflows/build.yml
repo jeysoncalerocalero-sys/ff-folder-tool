@@ -98,8 +98,8 @@ jobs:
                   applicationId = "com.fftool"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 3
-                  versionName = "3.0"
+                  versionCode = 4
+                  versionName = "4.0"
               }
 
               buildTypes {
@@ -134,6 +134,7 @@ jobs:
               <uses-permission android:name="android.permission.WAKE_LOCK" />
 
               <application
+                  android:name=".App"
                   android:allowBackup="true"
                   android:label="@string/app_name"
                   android:supportsRtl="true"
@@ -205,6 +206,101 @@ jobs:
               android:notificationTimeout="100"
               android:description="@string/a11y_desc"
               android:summary="@string/a11y_desc" />
+          EOF
+
+          cat > app/src/main/java/com/fftool/App.kt <<'EOF'
+          package com.fftool
+
+          import android.app.Application
+
+          class App : Application() {
+              override fun onCreate() {
+                  super.onCreate()
+                  Config.init(this)
+                  Logs.init(this)
+                  CrashHandler.install()
+                  Logs.event("app iniciada v4")
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/Logs.kt <<'EOF'
+          package com.fftool
+
+          import android.content.Context
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          object Logs {
+
+              private var dir: File? = null
+              private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+
+              fun init(ctx: Context) {
+                  if (dir == null) dir = ctx.applicationContext.filesDir
+              }
+
+              private fun archivo(nombre: String): File? = dir?.let { File(it, nombre) }
+
+              @Synchronized
+              fun event(msg: String) {
+                  val f = archivo("eventos.txt") ?: return
+                  try {
+                      if (f.length() > 300_000) f.delete()
+                      f.appendText(fmt.format(Date()) + "  " + msg + "\n")
+                  } catch (t: Throwable) {
+                  }
+              }
+
+              @Synchronized
+              fun crash(t: Throwable) {
+                  val f = archivo("ultimo_error.txt") ?: return
+                  try {
+                      f.writeText(
+                          fmt.format(Date()) + "\n" +
+                              t.javaClass.name + ": " + (t.message ?: "(sin mensaje)") + "\n\n" +
+                              t.stackTraceToString() + "\n\n--- eventos ---\n" + leer("eventos.txt")
+                      )
+                  } catch (e: Throwable) {
+                  }
+              }
+
+              fun leer(nombre: String): String {
+                  val f = archivo(nombre) ?: return ""
+                  return try {
+                      if (f.exists()) f.readText() else ""
+                  } catch (t: Throwable) {
+                      ""
+                  }
+              }
+
+              fun borrar(nombre: String) {
+                  try {
+                      archivo(nombre)?.delete()
+                  } catch (t: Throwable) {
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/CrashHandler.kt <<'EOF'
+          package com.fftool
+
+          object CrashHandler {
+              fun install() {
+                  val previo = Thread.getDefaultUncaughtExceptionHandler()
+                  Thread.setDefaultUncaughtExceptionHandler { hilo, t ->
+                      try {
+                          Logs.event("CRASH " + t.javaClass.simpleName)
+                          Logs.crash(t)
+                      } catch (e: Throwable) {
+                      }
+                      previo?.uncaughtException(hilo, t)
+                  }
+              }
+          }
           EOF
 
           cat > app/src/main/java/com/fftool/Config.kt <<'EOF'
@@ -310,6 +406,7 @@ jobs:
 
               override fun onServiceConnected() {
                   instance = this
+                  Logs.event("accesibilidad conectada")
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -318,6 +415,7 @@ jobs:
 
               override fun onDestroy() {
                   instance = null
+                  Logs.event("accesibilidad desconectada")
                   super.onDestroy()
               }
 
@@ -335,18 +433,23 @@ jobs:
               }
 
               private fun send(path: Path, ms: Long, then: (() -> Unit)?) {
-                  val stroke = GestureDescription.StrokeDescription(path, 0L, ms)
-                  val gesture = GestureDescription.Builder().addStroke(stroke).build()
-                  val cb = object : GestureResultCallback() {
-                      override fun onCompleted(g: GestureDescription?) {
-                          ui.post { then?.invoke() }
-                      }
+                  try {
+                      val stroke = GestureDescription.StrokeDescription(path, 0L, ms)
+                      val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                      val cb = object : GestureResultCallback() {
+                          override fun onCompleted(g: GestureDescription?) {
+                              ui.post { then?.invoke() }
+                          }
 
-                      override fun onCancelled(g: GestureDescription?) {
-                          ui.post { then?.invoke() }
+                          override fun onCancelled(g: GestureDescription?) {
+                              ui.post { then?.invoke() }
+                          }
                       }
+                      dispatchGesture(gesture, cb, null)
+                  } catch (t: Throwable) {
+                      Logs.event("gesto fallo: " + t.message)
+                      then?.invoke()
                   }
-                  dispatchGesture(gesture, cb, null)
               }
 
               companion object {
@@ -398,6 +501,13 @@ jobs:
               private var screenH = 0
               private val scale = 4
 
+              private var codigo = 0
+              private var datos: Intent? = null
+              private var intentos = 0
+
+              private var frames = 0
+              private var erroresFrame = 0
+
               private val busy = AtomicBoolean(false)
               private var lastFire = 0L
               private val ui = Handler(Looper.getMainLooper())
@@ -407,16 +517,51 @@ jobs:
               override fun onCreate() {
                   super.onCreate()
                   Config.init(this)
-                  createChannel()
+                  Logs.event("CaptureService creado")
+                  try {
+                      createChannel()
+                  } catch (t: Throwable) {
+                      Logs.event("canal fallo: " + t.message)
+                  }
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  startForegroundSafe()
-                  val code = intent?.getIntExtra("code", 0) ?: 0
+                  try {
+                      startForegroundSafe()
+                  } catch (t: Throwable) {
+                      Logs.event("startForeground fallo: " + t.javaClass.simpleName + ": " + t.message)
+                  }
+
+                  val c = intent?.getIntExtra("code", 0) ?: 0
                   @Suppress("DEPRECATION")
-                  val data = intent?.getParcelableExtra<Intent>("data")
-                  if (code != 0 && data != null) startProjection(code, data)
+                  val d = intent?.getParcelableExtra<Intent>("data")
+
+                  if (c != 0 && d != null) {
+                      codigo = c
+                      datos = d
+                      intentos = 0
+                      Logs.event("onStartCommand con permiso, esperando para abrir proyeccion")
+                      ui.postDelayed({ abrirProyeccion() }, 400L)
+                  } else {
+                      Logs.event("onStartCommand sin datos (reinicio del sistema)")
+                  }
                   return START_STICKY
+              }
+
+              private fun abrirProyeccion() {
+                  val d = datos ?: return
+                  try {
+                      preparar(codigo, d)
+                      Logs.event("proyeccion lista " + screenW + "x" + screenH)
+                  } catch (t: Throwable) {
+                      intentos++
+                      Logs.event("abrirProyeccion fallo intento " + intentos + ": " + t.javaClass.simpleName + ": " + t.message)
+                      if (intentos < 5) {
+                          ui.postDelayed({ abrirProyeccion() }, 800L)
+                      } else {
+                          Logs.crash(t)
+                      }
+                  }
               }
 
               private fun startForegroundSafe() {
@@ -453,7 +598,7 @@ jobs:
               }
 
               @Suppress("DEPRECATION")
-              private fun startProjection(code: Int, data: Intent) {
+              private fun preparar(c: Int, d: Intent) {
                   stopProjection()
 
                   val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -462,17 +607,26 @@ jobs:
                   screenW = metrics.widthPixels
                   screenH = metrics.heightPixels
 
-                  val bmpW = (screenW / scale).coerceAtLeast(1)
-                  val bmpH = (screenH / scale).coerceAtLeast(1)
+                  val bmpW = (screenW / scale).coerceAtLeast(2)
+                  val bmpH = (screenH / scale).coerceAtLeast(2)
 
                   val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                  projection = mpm.getMediaProjection(code, data)
+                  val proj = mpm.getMediaProjection(c, d)
+                      ?: throw IllegalStateException("getMediaProjection devolvio null")
+                  projection = proj
+
+                  proj.registerCallback(object : MediaProjection.Callback() {
+                      override fun onStop() {
+                          Logs.event("proyeccion revocada por el sistema")
+                          stopProjection()
+                      }
+                  }, ui)
 
                   thread = HandlerThread("ff-capture").also { it.start() }
                   handler = Handler(thread!!.looper)
                   reader = ImageReader.newInstance(bmpW, bmpH, PixelFormat.RGBA_8888, 3)
 
-                  display = projection?.createVirtualDisplay(
+                  display = proj.createVirtualDisplay(
                       "ff-pro-max",
                       bmpW,
                       bmpH,
@@ -485,20 +639,22 @@ jobs:
 
                   reader?.setOnImageAvailableListener({ r -> onFrame(r) }, handler)
                   Config.enabled = true
+                  frames = 0
+                  erroresFrame = 0
               }
 
               private fun onFrame(r: ImageReader) {
                   val image: Image = try {
                       r.acquireLatestImage()
-                  } catch (e: Exception) {
+                  } catch (t: Throwable) {
                       return
                   }
 
                   try {
                       if (!Config.enabled) return
                       if (busy.get()) return
-                      val now = SystemClock.uptimeMillis()
-                      if (now - lastFire < Config.fireIntervalMs) return
+                      val ahora = SystemClock.uptimeMillis()
+                      if (ahora - lastFire < Config.fireIntervalMs) return
 
                       val plane = image.planes[0]
                       val buf = plane.buffer
@@ -516,27 +672,29 @@ jobs:
                       val bottom = (cy + half).coerceAtMost(h - 1)
 
                       val redMin = Config.redMin
-                      val maxOther = redMin * 60 / 100
+                      val maxOtros = redMin * 60 / 100
 
-                      val rowBytes = ByteArray(rowStride)
+                      val fila = ByteArray(rowStride)
                       var sx = 0
                       var sy = 0
                       var n = 0
 
                       var y = top
                       while (y <= bottom) {
-                          buf.position(y * rowStride)
+                          val pos = y * rowStride
+                          if (pos >= buf.limit()) break
+                          buf.position(pos)
                           val len = minOf(rowStride, buf.remaining())
                           if (len <= 0) break
-                          buf.get(rowBytes, 0, len)
+                          buf.get(fila, 0, len)
                           var x = left
                           while (x <= right) {
                               val o = x * pixStride
                               if (o + 2 < len) {
-                                  val rr = rowBytes[o].toInt() and 0xFF
-                                  val gg = rowBytes[o + 1].toInt() and 0xFF
-                                  val bb = rowBytes[o + 2].toInt() and 0xFF
-                                  if (rr >= redMin && gg <= maxOther && bb <= maxOther) {
+                                  val rr = fila[o].toInt() and 0xFF
+                                  val gg = fila[o + 1].toInt() and 0xFF
+                                  val bb = fila[o + 2].toInt() and 0xFF
+                                  if (rr >= redMin && gg <= maxOtros && bb <= maxOtros) {
                                       sx += x
                                       sy += y
                                       n++
@@ -547,17 +705,23 @@ jobs:
                           y++
                       }
 
+                      frames++
+                      if (frames == 1) Logs.event("primer frame " + w + "x" + h + " stride " + rowStride + " pix " + pixStride)
+
                       if (n >= Config.minPixels) {
                           val bx = sx / n
                           val by = sy / n
                           fire((bx.toFloat() * scale) + Config.offsetX, (by.toFloat() * scale) + Config.offsetY)
                       }
-                  } catch (e: Exception) {
-                      // frame malo, se ignora
+                  } catch (t: Throwable) {
+                      erroresFrame++
+                      if (erroresFrame <= 5) {
+                          Logs.event("error en frame: " + t.javaClass.simpleName + ": " + t.message)
+                      }
                   } finally {
                       try {
                           image.close()
-                      } catch (e: Exception) {
+                      } catch (t: Throwable) {
                       }
                   }
               }
@@ -579,31 +743,33 @@ jobs:
               }
 
               private fun stopProjection() {
+                  val p = projection
+                  projection = null
                   try {
                       reader?.setOnImageAvailableListener(null, null)
-                  } catch (e: Exception) {
+                  } catch (t: Throwable) {
                   }
                   try {
                       display?.release()
-                  } catch (e: Exception) {
+                  } catch (t: Throwable) {
                   }
                   try {
                       reader?.close()
-                  } catch (e: Exception) {
+                  } catch (t: Throwable) {
                   }
                   try {
-                      projection?.stop()
-                  } catch (e: Exception) {
+                      p?.stop()
+                  } catch (t: Throwable) {
                   }
                   display = null
                   reader = null
-                  projection = null
                   thread?.quitSafely()
                   thread = null
                   handler = null
               }
 
               override fun onDestroy() {
+                  Logs.event("CaptureService destruido")
                   stopProjection()
                   super.onDestroy()
               }
@@ -653,12 +819,15 @@ jobs:
 
               private var wm: WindowManager? = null
               private var panel: LinearLayout? = null
-              private lateinit var state: TextView
+              private lateinit var estado: TextView
               private val ui = Handler(Looper.getMainLooper())
 
               private val tick = object : Runnable {
                   override fun run() {
-                      render()
+                      try {
+                          render()
+                      } catch (t: Throwable) {
+                      }
                       ui.postDelayed(this, 600)
                   }
               }
@@ -668,8 +837,14 @@ jobs:
               override fun onCreate() {
                   super.onCreate()
                   Config.init(this)
+                  Logs.event("panel flotante creado")
                   wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                  build()
+                  try {
+                      build()
+                  } catch (t: Throwable) {
+                      Logs.event("panel fallo: " + t.javaClass.simpleName + ": " + t.message)
+                      Logs.crash(t)
+                  }
                   ui.post(tick)
               }
 
@@ -683,11 +858,12 @@ jobs:
                   panel?.let {
                       try {
                           wm?.removeView(it)
-                      } catch (e: Exception) {
+                      } catch (t: Throwable) {
                       }
                   }
                   panel = null
                   running = false
+                  Logs.event("panel flotante cerrado")
                   super.onDestroy()
               }
 
@@ -710,29 +886,29 @@ jobs:
                   }
                   col.addView(head)
 
-                  state = TextView(this).apply {
+                  estado = TextView(this).apply {
                       setTextColor(Color.WHITE)
                       textSize = 10f
                       gravity = Gravity.CENTER
                       setPadding(0, 0, 0, dp(6))
                   }
-                  col.addView(state)
+                  col.addView(estado)
 
-                  col.addView(small("ON / OFF") {
+                  col.addView(boton("ON / OFF") {
                       Config.enabled = !Config.enabled
                       render()
                   })
-                  col.addView(small("DURO") {
+                  col.addView(boton("DURO") {
                       Config.presetDuro()
                       render()
                   })
-                  col.addView(small("HEAD FLICK") {
+                  col.addView(boton("HEAD FLICK") {
                       Config.headFlick = !Config.headFlick
                       render()
                   })
-                  col.addView(small("MAS SENSIBLE +") { adjust(1) })
-                  col.addView(small("MENOS -") { adjust(-1) })
-                  col.addView(small("CERRAR PANEL") { stopSelf() })
+                  col.addView(boton("MAS SENSIBLE +") { ajustar(1) })
+                  col.addView(boton("MENOS -") { ajustar(-1) })
+                  col.addView(boton("CERRAR PANEL") { stopSelf() })
 
                   val params = WindowManager.LayoutParams(
                       dp(104),
@@ -763,7 +939,7 @@ jobs:
                               params.y = (ev.rawY - dy).toInt()
                               try {
                                   wm?.updateViewLayout(panel, params)
-                              } catch (e: Exception) {
+                              } catch (t: Throwable) {
                               }
                               true
                           }
@@ -772,14 +948,11 @@ jobs:
                   }
 
                   panel = col
-                  try {
-                      wm?.addView(col, params)
-                  } catch (e: Exception) {
-                  }
+                  wm?.addView(col, params)
                   render()
               }
 
-              private fun small(label: String, action: () -> Unit): TextView {
+              private fun boton(label: String, accion: () -> Unit): TextView {
                   return TextView(this).apply {
                       text = label
                       setTextColor(Color.WHITE)
@@ -787,11 +960,11 @@ jobs:
                       gravity = Gravity.CENTER
                       setPadding(0, dp(7), 0, dp(7))
                       setBackgroundColor(0xFF23232E.toInt())
-                      setOnClickListener { action() }
+                      setOnClickListener { accion() }
                   }
               }
 
-              private fun adjust(dir: Int) {
+              private fun ajustar(dir: Int) {
                   Config.redMin = Config.redMin - (8 * dir)
                   Config.minPixels = Config.minPixels - dir
                   render()
@@ -803,8 +976,8 @@ jobs:
                       TouchAccessibilityService.ready() -> "ACTIVO"
                       else -> "FALTA ACCESIBILIDAD"
                   }
-                  val hf = if (Config.headFlick) "HEAD ${Config.flickPx}px" else "HEAD off"
-                  state.text = "$st\nrojo ${Config.redMin} · ${Config.minPixels}px\nzona ${Config.regionHalf}\ncadencia ${Config.fireIntervalMs}ms\n$hf"
+                  val hf = if (Config.headFlick) "HEAD " + Config.flickPx + "px" else "HEAD off"
+                  estado.text = st + "\nrojo " + Config.redMin + " · " + Config.minPixels + "px\nzona " + Config.regionHalf + "\ncadencia " + Config.fireIntervalMs + "ms\n" + hf
               }
 
               companion object {
@@ -814,7 +987,10 @@ jobs:
                   fun isShowing(): Boolean = running
 
                   fun show(ctx: Context) {
-                      if (!Settings.canDrawOverlays(ctx)) return
+                      if (!Settings.canDrawOverlays(ctx)) {
+                          Logs.event("no se puede mostrar panel: falta permiso")
+                          return
+                      }
                       running = true
                       ctx.startService(Intent(ctx, OverlayService::class.java))
                   }
@@ -856,23 +1032,25 @@ jobs:
           class MainActivity : AppCompatActivity() {
 
               private lateinit var status: TextView
-              private lateinit var startBtn: Button
+              private lateinit var diag: TextView
               private val ui = Handler(Looper.getMainLooper())
 
               private val refresh = object : Runnable {
                   override fun run() {
                       render()
-                      ui.postDelayed(this, 800)
+                      ui.postDelayed(this, 1200)
                   }
               }
 
               private val projLauncher =
                   registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
                       if (r.resultCode == Activity.RESULT_OK && r.data != null) {
+                          Logs.event("permiso de captura concedido")
                           CaptureService.start(this, r.resultCode, r.data!!)
                           OverlayService.show(this)
                           toast("PRO MAX activo. Abre Free Fire.")
                       } else {
+                          Logs.event("permiso de captura denegado")
                           toast("Permiso de captura denegado")
                       }
                       render()
@@ -902,23 +1080,23 @@ jobs:
               private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
               private fun lp(matchW: Boolean = false, h: Int = -2, top: Int = 0, bottom: Int = 0): LinearLayout.LayoutParams {
-                  val params = LinearLayout.LayoutParams(
+                  val p = LinearLayout.LayoutParams(
                       if (matchW) LinearLayout.LayoutParams.MATCH_PARENT else LinearLayout.LayoutParams.WRAP_CONTENT,
                       h
                   )
-                  params.topMargin = top
-                  params.bottomMargin = bottom
-                  return params
+                  p.topMargin = top
+                  p.bottomMargin = bottom
+                  return p
               }
 
-              private fun stepButton(label: String, action: () -> Unit): Button {
+              private fun stepButton(label: String, accion: () -> Unit): Button {
                   return Button(this).apply {
                       text = label
                       textSize = 14f
                       setTextColor(Color.WHITE)
                       setBackgroundColor(0xFF23232E.toInt())
                       gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                      setOnClickListener { action() }
+                      setOnClickListener { accion() }
                   }
               }
 
@@ -938,11 +1116,11 @@ jobs:
                   }, lp(matchW = true, h = dp(50)))
 
                   col.addView(TextView(this).apply {
-                      text = "Trigger bot anti ban + herramientas de carpeta\nDetecta el rojo del centro y dispara por accesibilidad"
+                      text = "v4 · trigger anti ban + herramientas de carpeta"
                       setTextColor(0xFFAAAAAA.toInt())
-                      textSize = 13f
+                      textSize = 12f
                       gravity = Gravity.CENTER
-                      setPadding(0, 0, 0, dp(18))
+                      setPadding(0, 0, 0, dp(16))
                   })
 
                   status = TextView(this).apply {
@@ -952,7 +1130,7 @@ jobs:
                       setPadding(dp(14), dp(14), dp(14), dp(14))
                       setBackgroundColor(0xFF1A1A22.toInt())
                   }
-                  col.addView(status, lp(matchW = true, bottom = dp(16)))
+                  col.addView(status, lp(matchW = true, bottom = dp(14)))
 
                   col.addView(stepButton("1 · Permitir superposición") {
                       startActivity(
@@ -972,14 +1150,13 @@ jobs:
                       startActivity(Intent(this@MainActivity, FolderActivity::class.java))
                   })
 
-                  startBtn = Button(this).apply {
+                  col.addView(Button(this).apply {
                       text = "INICIAR PRO MAX"
                       textSize = 16f
                       setTextColor(Color.WHITE)
                       setBackgroundColor(0xFFC81E28.toInt())
                       setOnClickListener { requestCapture() }
-                  }
-                  col.addView(startBtn, lp(matchW = true, h = dp(56), top = dp(16), bottom = dp(10)))
+                  }, lp(matchW = true, h = dp(56), top = dp(16), bottom = dp(10)))
 
                   col.addView(Button(this).apply {
                       text = "MODO PEGAR DURO"
@@ -988,6 +1165,7 @@ jobs:
                       setBackgroundColor(0xFFB00020.toInt())
                       setOnClickListener {
                           Config.presetDuro()
+                          Logs.event("modo duro activado")
                           toast("Modo agresivo: cadencia 22ms, flick 300px")
                           render()
                       }
@@ -1008,10 +1186,27 @@ jobs:
                   }, lp(matchW = true, h = dp(50)))
 
                   col.addView(TextView(this).apply {
-                      text = "Abre PRO MAX primero y luego Free Fire. Arrastra el panel por el titulo para moverlo fuera del centro, si no tapa el punto rojo."
-                      setTextColor(0xFF777788.toInt())
-                      textSize = 12f
-                      setPadding(0, dp(18), 0, 0)
+                      text = "DIAGNOSTICO (toca para copiar)"
+                      setTextColor(0xFF66FF99.toInt())
+                      textSize = 13f
+                      setTypeface(Typeface.DEFAULT_BOLD)
+                      setPadding(0, dp(22), 0, dp(6))
+                  })
+
+                  diag = TextView(this).apply {
+                      setTextColor(0xFFFFC9C9.toInt())
+                      textSize = 10f
+                      setTextIsSelectable(true)
+                      setPadding(dp(12), dp(12), dp(12), dp(12))
+                      setBackgroundColor(0xFF1A1A22.toInt())
+                  }
+                  col.addView(diag, lp(matchW = true, bottom = dp(10)))
+
+                  col.addView(stepButton("BORRAR DIAGNOSTICO") {
+                      Logs.borrar("ultimo_error.txt")
+                      Logs.borrar("eventos.txt")
+                      Logs.event("diagnostico borrado")
+                      render()
                   })
 
                   return ScrollView(this).apply { addView(col) }
@@ -1022,13 +1217,24 @@ jobs:
                   val ac = if (TouchAccessibilityService.ready()) "OK" else "FALTA"
                   val cap = if (Config.enabled) "ACTIVO" else "PAUSA"
                   status.text = "Superposición: $ov\nAccesibilidad: $ac\nEstado: $cap\n\nrojo ${Config.redMin} · ${Config.minPixels}px · zona ${Config.regionHalf}\ncadencia ${Config.fireIntervalMs}ms · tap ${Config.tapMs}ms\n${if (Config.headFlick) "HeadFlick ON ${Config.flickPx}px" else "HeadFlick OFF"}"
-                  startBtn.isEnabled = true
+
+                  val err = Logs.leer("ultimo_error.txt").trim()
+                  val ev = Logs.leer("eventos.txt").trim().lines().takeLast(14).joinToString("\n")
+                  diag.text = buildString {
+                      if (err.isBlank()) {
+                          append("ULTIMO ERROR: ninguno\n")
+                      } else {
+                          append("ULTIMO ERROR:\n")
+                          append(err.take(1600))
+                          append("\n")
+                      }
+                      append("\nEVENTOS:\n")
+                      append(if (ev.isBlank()) "sin eventos" else ev)
+                  }
               }
 
-              private fun canOverlay(): Boolean = Settings.canDrawOverlays(this)
-
               private fun requestCapture() {
-                  if (!canOverlay()) {
+                  if (!Settings.canDrawOverlays(this)) {
                       toast("Primero permite la superposición (paso 1)")
                       return
                   }
@@ -1112,7 +1318,7 @@ jobs:
                   col.addView(title);
 
                   TextView info = new TextView(this);
-                  info.setText("Copia los archivos que pusiste en assets/ff hacia la carpeta del juego. Tambien puedes elegir la carpeta con el selector (recomendado en Android 11+).");
+                  info.setText("Copia los archivos que pusiste en assets/ff hacia la carpeta del juego. En Android 11+ usa el selector, la ruta escrita suele fallar por la restriccion de Android/data.");
                   info.setTextColor(0xFFAAAAAA);
                   info.setTextSize(12f);
                   col.addView(info);
@@ -1127,12 +1333,10 @@ jobs:
                   col.addView(btn("Copiar a la ruta escrita", v -> copiarAManual()));
                   col.addView(btn("Elegir carpeta del juego (selector)", v -> elegirCarpeta()));
                   col.addView(btn("Backup de lo que hay en la carpeta", v -> backup()));
-                  col.addView(btn("Usar ruta de Free Fire", v -> {
-                      dirField.setText("/storage/emulated/0/Android/data/com.dts.freefireth/files/");
-                  }));
-                  col.addView(btn("Usar ruta de Free Fire MAX", v -> {
-                      dirField.setText("/storage/emulated/0/Android/data/com.dts.freefiremax/files/");
-                  }));
+                  col.addView(btn("Usar ruta de Free Fire", v ->
+                          dirField.setText("/storage/emulated/0/Android/data/com.dts.freefireth/files/")));
+                  col.addView(btn("Usar ruta de Free Fire MAX", v ->
+                          dirField.setText("/storage/emulated/0/Android/data/com.dts.freefiremax/files/")));
 
                   log = new TextView(this);
                   log.setTextColor(0xFF7CFC9A);
@@ -1357,7 +1561,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FF-PRO-MAX-debug
+          name: FF-PRO-MAX-v4
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: warn
 
@@ -1366,9 +1570,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk FF-PRO-MAX.apk
-          if gh release view v3 > /dev/null 2>&1; then
-            gh release upload v3 FF-PRO-MAX.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk FF-PRO-MAX-v4.apk
+          if gh release view v4 > /dev/null 2>&1; then
+            gh release upload v4 FF-PRO-MAX-v4.apk --clobber
           else
-            gh release create v3 FF-PRO-MAX.apk --title "FF PRO MAX 3.0" --notes "APK compilado automaticamente. Instala y activa accesibilidad + superposicion."
+            gh release create v4 FF-PRO-MAX-v4.apk --title "FF PRO MAX 4.0" --notes "Con diagnostico de errores en pantalla."
           fi
