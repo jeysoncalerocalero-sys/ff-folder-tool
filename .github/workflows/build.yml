@@ -1,14 +1,19 @@
-name: Build APK
+name: FF PRO MAX
 
 on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
+  construir:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Bajar el codigo
+        uses: actions/checkout@v4
 
       - name: Java 17
         uses: actions/setup-java@v4
@@ -16,49 +21,1354 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Gradle 8.7 fijo
+      - name: Android SDK 34
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SM" ]; then
+            yes | "$SM" --licenses > /dev/null 2>&1 || true
+            "$SM" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+          fi
+
+      - name: Gradle 8.7
         run: |
           curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/g.zip
           unzip -q /tmp/g.zip -d $HOME
           echo "$HOME/gradle-8.7/bin" >> $GITHUB_PATH
 
-      - name: Reacomodar proyecto
+      - name: Generar proyecto
         run: |
           set -e
-          rm -rf /tmp/p
-          mkdir -p /tmp/p
-          cp -r ".github/workflows/app" /tmp/p/app
-          cp .github/workflows/build.gradle.kts /tmp/p/
-          cp .github/workflows/settings.gradle.kts /tmp/p/
-          cp .github/workflows/gradle.properties /tmp/p/
+          mkdir -p app/src/main/java/com/fftool
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/assets/ff
 
-          # el java quedo doblemente anidado, lo subimos a su lugar
-          mkdir -p /tmp/p/app/src/main/java/com/fftool
-          mv /tmp/p/app/src/main/app/src/main/java/com/fftool/MainActivity.java \
-             /tmp/p/app/src/main/java/com/fftool/MainActivity.java
-          rm -rf /tmp/p/app/src/main/app
+          SRC="$(find . -path '*/assets/ff' -type d -not -path './.git/*' | head -n1)"
+          if [ -n "$SRC" ] && [ "$SRC" != "./app/src/main/assets/ff" ]; then
+            cp -rn "$SRC"/. app/src/main/assets/ff/ 2>/dev/null || true
+          fi
 
-          # los assets viven en la raiz, van dentro del modulo
-          mkdir -p /tmp/p/app/src/main/assets/ff
-          cp app/src/main/assets/ff/* /tmp/p/app/src/main/assets/ff/ 2>/dev/null || true
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FFProMax"
+          include(":app")
+          EOF
 
-          echo "=== estructura final ==="
-          find /tmp/p -type f | sort
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.fftool"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.fftool"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 3
+                  versionName = "3.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      signingConfig = signingConfigs.getByName("debug")
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("androidx.documentfile:documentfile:1.0.1")
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+              <application
+                  android:allowBackup="true"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.AppCompat.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <activity
+                      android:name=".FolderActivity"
+                      android:exported="false"
+                      android:label="@string/folder_title" />
+
+                  <service
+                      android:name=".CaptureService"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaProjection" />
+
+                  <service
+                      android:name=".OverlayService"
+                      android:exported="false" />
+
+                  <service
+                      android:name=".TouchAccessibilityService"
+                      android:exported="true"
+                      android:label="@string/a11y_label"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_service_config" />
+                  </service>
+
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">FF PRO MAX</string>
+              <string name="folder_title">Archivos del juego</string>
+              <string name="a11y_label">FF PRO MAX · Disparo externo</string>
+              <string name="a11y_desc">Inyecta toques en pantalla para el auto disparo. No toca el proceso del juego, asi que es anti ban.</string>
+              <string name="notif_channel_capture">Captura de pantalla</string>
+              <string name="notif_channel_capture_desc">Analiza el centro de la pantalla buscando el punto rojo</string>
+              <string name="notif_capture_title">FF PRO MAX activo</string>
+              <string name="notif_capture_text">Buscando rojo en el centro</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_service_config.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagDefault"
+              android:canPerformGestures="true"
+              android:canRetrieveWindowContent="true"
+              android:notificationTimeout="100"
+              android:description="@string/a11y_desc"
+              android:summary="@string/a11y_desc" />
+          EOF
+
+          cat > app/src/main/java/com/fftool/Config.kt <<'EOF'
+          package com.fftool
+
+          import android.content.Context
+          import android.content.SharedPreferences
+
+          object Config {
+
+              private const val PREFS = "ff_promax_prefs"
+
+              private var sp: SharedPreferences? = null
+
+              fun init(ctx: Context) {
+                  if (sp == null) {
+                      sp = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  }
+              }
+
+              private val p: SharedPreferences
+                  get() = sp ?: throw IllegalStateException("Config.init no llamado")
+
+              private fun edit(block: (SharedPreferences.Editor) -> Unit) {
+                  val e = p.edit()
+                  block(e)
+                  e.apply()
+              }
+
+              var enabled: Boolean
+                  get() = p.getBoolean("enabled", true)
+                  set(v) = edit { it.putBoolean("enabled", v) }
+
+              var redMin: Int
+                  get() = p.getInt("redMin", 110)
+                  set(v) = edit { it.putInt("redMin", v.coerceIn(60, 250)) }
+
+              var minPixels: Int
+                  get() = p.getInt("minPixels", 5)
+                  set(v) = edit { it.putInt("minPixels", v.coerceIn(2, 400)) }
+
+              var regionHalf: Int
+                  get() = p.getInt("regionHalf", 30)
+                  set(v) = edit { it.putInt("regionHalf", v.coerceIn(6, 200)) }
+
+              var fireIntervalMs: Long
+                  get() = p.getLong("fireIntervalMs", 40L)
+                  set(v) = edit { it.putLong("fireIntervalMs", v.coerceIn(16L, 400L)) }
+
+              var tapMs: Long
+                  get() = p.getLong("tapMs", 25L)
+                  set(v) = edit { it.putLong("tapMs", v.coerceIn(8L, 120L)) }
+
+              var headFlick: Boolean
+                  get() = p.getBoolean("headFlick", false)
+                  set(v) = edit { it.putBoolean("headFlick", v) }
+
+              var flickPx: Int
+                  get() = p.getInt("flickPx", 180)
+                  set(v) = edit { it.putInt("flickPx", v.coerceIn(40, 900)) }
+
+              var flickMs: Long
+                  get() = p.getLong("flickMs", 60L)
+                  set(v) = edit { it.putLong("flickMs", v.coerceIn(20L, 250L)) }
+
+              var offsetX: Int
+                  get() = p.getInt("offsetX", 0)
+                  set(v) = edit { it.putInt("offsetX", v.coerceIn(-200, 200)) }
+
+              var offsetY: Int
+                  get() = p.getInt("offsetY", 0)
+                  set(v) = edit { it.putInt("offsetY", v.coerceIn(-200, 200)) }
+
+              fun presetDuro() {
+                  enabled = true
+                  headFlick = true
+                  redMin = 115
+                  minPixels = 5
+                  regionHalf = 46
+                  fireIntervalMs = 22L
+                  tapMs = 18L
+                  flickPx = 300
+                  flickMs = 45L
+                  offsetX = 0
+                  offsetY = 0
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/TouchAccessibilityService.kt <<'EOF'
+          package com.fftool
+
+          import android.accessibilityservice.AccessibilityService
+          import android.accessibilityservice.GestureDescription
+          import android.graphics.Path
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.accessibility.AccessibilityEvent
+
+          class TouchAccessibilityService : AccessibilityService() {
+
+              private val ui = Handler(Looper.getMainLooper())
+
+              override fun onServiceConnected() {
+                  instance = this
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+
+              override fun onInterrupt() {}
+
+              override fun onDestroy() {
+                  instance = null
+                  super.onDestroy()
+              }
+
+              fun tap(x: Float, y: Float, ms: Long, then: (() -> Unit)? = null) {
+                  val path = Path().apply { moveTo(x, y) }
+                  send(path, ms.coerceAtLeast(8L), then)
+              }
+
+              fun flick(x: Float, y: Float, dx: Float, dy: Float, ms: Long, then: (() -> Unit)? = null) {
+                  val path = Path().apply {
+                      moveTo(x, y)
+                      lineTo(x + dx, y + dy)
+                  }
+                  send(path, ms.coerceAtLeast(16L), then)
+              }
+
+              private fun send(path: Path, ms: Long, then: (() -> Unit)?) {
+                  val stroke = GestureDescription.StrokeDescription(path, 0L, ms)
+                  val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                  val cb = object : GestureResultCallback() {
+                      override fun onCompleted(g: GestureDescription?) {
+                          ui.post { then?.invoke() }
+                      }
+
+                      override fun onCancelled(g: GestureDescription?) {
+                          ui.post { then?.invoke() }
+                      }
+                  }
+                  dispatchGesture(gesture, cb, null)
+              }
+
+              companion object {
+                  @Volatile
+                  var instance: TouchAccessibilityService? = null
+
+                  fun ready(): Boolean = instance != null
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/CaptureService.kt <<'EOF'
+          package com.fftool
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.graphics.PixelFormat
+          import android.hardware.display.DisplayManager
+          import android.hardware.display.VirtualDisplay
+          import android.media.Image
+          import android.media.ImageReader
+          import android.media.projection.MediaProjection
+          import android.media.projection.MediaProjectionManager
+          import android.os.Build
+          import android.os.Handler
+          import android.os.HandlerThread
+          import android.os.IBinder
+          import android.os.Looper
+          import android.os.SystemClock
+          import android.util.DisplayMetrics
+          import android.view.WindowManager
+          import androidx.core.app.NotificationCompat
+          import java.util.concurrent.atomic.AtomicBoolean
+
+          class CaptureService : Service() {
+
+              private var projection: MediaProjection? = null
+              private var display: VirtualDisplay? = null
+              private var reader: ImageReader? = null
+              private var thread: HandlerThread? = null
+              private var handler: Handler? = null
+
+              private var screenW = 0
+              private var screenH = 0
+              private val scale = 4
+
+              private val busy = AtomicBoolean(false)
+              private var lastFire = 0L
+              private val ui = Handler(Looper.getMainLooper())
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  Config.init(this)
+                  createChannel()
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  startForegroundSafe()
+                  val code = intent?.getIntExtra("code", 0) ?: 0
+                  @Suppress("DEPRECATION")
+                  val data = intent?.getParcelableExtra<Intent>("data")
+                  if (code != 0 && data != null) startProjection(code, data)
+                  return START_STICKY
+              }
+
+              private fun startForegroundSafe() {
+                  val n = notification()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      startForeground(7, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                  } else {
+                      startForeground(7, n)
+                  }
+              }
+
+              private fun notification(): Notification {
+                  return NotificationCompat.Builder(this, CHANNEL)
+                      .setContentTitle(getString(R.string.notif_capture_title))
+                      .setContentText(getString(R.string.notif_capture_text))
+                      .setSmallIcon(android.R.drawable.ic_menu_view)
+                      .setOngoing(true)
+                      .build()
+              }
+
+              private fun createChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val nm = getSystemService(NotificationManager::class.java)
+                      if (nm.getNotificationChannel(CHANNEL) == null) {
+                          val ch = NotificationChannel(
+                              CHANNEL,
+                              getString(R.string.notif_channel_capture),
+                              NotificationManager.IMPORTANCE_LOW
+                          )
+                          ch.description = getString(R.string.notif_channel_capture_desc)
+                          nm.createNotificationChannel(ch)
+                      }
+                  }
+              }
+
+              @Suppress("DEPRECATION")
+              private fun startProjection(code: Int, data: Intent) {
+                  stopProjection()
+
+                  val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                  val metrics = DisplayMetrics()
+                  wm.defaultDisplay.getRealMetrics(metrics)
+                  screenW = metrics.widthPixels
+                  screenH = metrics.heightPixels
+
+                  val bmpW = (screenW / scale).coerceAtLeast(1)
+                  val bmpH = (screenH / scale).coerceAtLeast(1)
+
+                  val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                  projection = mpm.getMediaProjection(code, data)
+
+                  thread = HandlerThread("ff-capture").also { it.start() }
+                  handler = Handler(thread!!.looper)
+                  reader = ImageReader.newInstance(bmpW, bmpH, PixelFormat.RGBA_8888, 3)
+
+                  display = projection?.createVirtualDisplay(
+                      "ff-pro-max",
+                      bmpW,
+                      bmpH,
+                      metrics.densityDpi,
+                      DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                      reader!!.surface,
+                      null,
+                      handler
+                  )
+
+                  reader?.setOnImageAvailableListener({ r -> onFrame(r) }, handler)
+                  Config.enabled = true
+              }
+
+              private fun onFrame(r: ImageReader) {
+                  val image: Image = try {
+                      r.acquireLatestImage()
+                  } catch (e: Exception) {
+                      return
+                  }
+
+                  try {
+                      if (!Config.enabled) return
+                      if (busy.get()) return
+                      val now = SystemClock.uptimeMillis()
+                      if (now - lastFire < Config.fireIntervalMs) return
+
+                      val plane = image.planes[0]
+                      val buf = plane.buffer
+                      val rowStride = plane.rowStride
+                      val pixStride = plane.pixelStride
+                      val w = image.width
+                      val h = image.height
+
+                      val cx = w / 2
+                      val cy = h / 2
+                      val half = Config.regionHalf
+                      val left = (cx - half).coerceAtLeast(0)
+                      val top = (cy - half).coerceAtLeast(0)
+                      val right = (cx + half).coerceAtMost(w - 1)
+                      val bottom = (cy + half).coerceAtMost(h - 1)
+
+                      val redMin = Config.redMin
+                      val maxOther = redMin * 60 / 100
+
+                      val rowBytes = ByteArray(rowStride)
+                      var sx = 0
+                      var sy = 0
+                      var n = 0
+
+                      var y = top
+                      while (y <= bottom) {
+                          buf.position(y * rowStride)
+                          val len = minOf(rowStride, buf.remaining())
+                          if (len <= 0) break
+                          buf.get(rowBytes, 0, len)
+                          var x = left
+                          while (x <= right) {
+                              val o = x * pixStride
+                              if (o + 2 < len) {
+                                  val rr = rowBytes[o].toInt() and 0xFF
+                                  val gg = rowBytes[o + 1].toInt() and 0xFF
+                                  val bb = rowBytes[o + 2].toInt() and 0xFF
+                                  if (rr >= redMin && gg <= maxOther && bb <= maxOther) {
+                                      sx += x
+                                      sy += y
+                                      n++
+                                  }
+                              }
+                              x++
+                          }
+                          y++
+                      }
+
+                      if (n >= Config.minPixels) {
+                          val bx = sx / n
+                          val by = sy / n
+                          fire((bx.toFloat() * scale) + Config.offsetX, (by.toFloat() * scale) + Config.offsetY)
+                      }
+                  } catch (e: Exception) {
+                      // frame malo, se ignora
+                  } finally {
+                      try {
+                          image.close()
+                      } catch (e: Exception) {
+                      }
+                  }
+              }
+
+              private fun fire(x: Float, y: Float) {
+                  val svc = TouchAccessibilityService.instance ?: return
+                  if (!busy.compareAndSet(false, true)) return
+                  lastFire = SystemClock.uptimeMillis()
+
+                  if (Config.headFlick) {
+                      svc.flick(x, y, 0f, -Config.flickPx.toFloat(), Config.flickMs) {
+                          svc.tap(x, y, Config.tapMs) { busy.set(false) }
+                      }
+                  } else {
+                      svc.tap(x, y, Config.tapMs) { busy.set(false) }
+                  }
+
+                  ui.postDelayed({ busy.set(false) }, 400L)
+              }
+
+              private fun stopProjection() {
+                  try {
+                      reader?.setOnImageAvailableListener(null, null)
+                  } catch (e: Exception) {
+                  }
+                  try {
+                      display?.release()
+                  } catch (e: Exception) {
+                  }
+                  try {
+                      reader?.close()
+                  } catch (e: Exception) {
+                  }
+                  try {
+                      projection?.stop()
+                  } catch (e: Exception) {
+                  }
+                  display = null
+                  reader = null
+                  projection = null
+                  thread?.quitSafely()
+                  thread = null
+                  handler = null
+              }
+
+              override fun onDestroy() {
+                  stopProjection()
+                  super.onDestroy()
+              }
+
+              companion object {
+                  const val CHANNEL = "ff_promax_capture"
+
+                  fun start(ctx: Context, code: Int, data: Intent) {
+                      val i = Intent(ctx, CaptureService::class.java)
+                      i.putExtra("code", code)
+                      i.putExtra("data", data)
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          ctx.startForegroundService(i)
+                      } else {
+                          ctx.startService(i)
+                      }
+                  }
+
+                  fun stop(ctx: Context) {
+                      ctx.stopService(Intent(ctx, CaptureService::class.java))
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/OverlayService.kt <<'EOF'
+          package com.fftool
+
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.Color
+          import android.graphics.PixelFormat
+          import android.graphics.Typeface
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.MotionEvent
+          import android.view.WindowManager
+          import android.widget.LinearLayout
+          import android.widget.TextView
+
+          class OverlayService : Service() {
+
+              private var wm: WindowManager? = null
+              private var panel: LinearLayout? = null
+              private lateinit var state: TextView
+              private val ui = Handler(Looper.getMainLooper())
+
+              private val tick = object : Runnable {
+                  override fun run() {
+                      render()
+                      ui.postDelayed(this, 600)
+                  }
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  Config.init(this)
+                  wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                  build()
+                  ui.post(tick)
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  running = true
+                  return START_STICKY
+              }
+
+              override fun onDestroy() {
+                  ui.removeCallbacks(tick)
+                  panel?.let {
+                      try {
+                          wm?.removeView(it)
+                      } catch (e: Exception) {
+                      }
+                  }
+                  panel = null
+                  running = false
+                  super.onDestroy()
+              }
+
+              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+              private fun build() {
+                  val col = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(dp(10), dp(10), dp(10), dp(10))
+                      setBackgroundColor(0xCC14141C.toInt())
+                  }
+
+                  val head = TextView(this).apply {
+                      text = "FF PRO MAX"
+                      setTextColor(0xFFFF3B30.toInt())
+                      textSize = 13f
+                      typeface = Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                      setPadding(0, 0, 0, dp(6))
+                  }
+                  col.addView(head)
+
+                  state = TextView(this).apply {
+                      setTextColor(Color.WHITE)
+                      textSize = 10f
+                      gravity = Gravity.CENTER
+                      setPadding(0, 0, 0, dp(6))
+                  }
+                  col.addView(state)
+
+                  col.addView(small("ON / OFF") {
+                      Config.enabled = !Config.enabled
+                      render()
+                  })
+                  col.addView(small("DURO") {
+                      Config.presetDuro()
+                      render()
+                  })
+                  col.addView(small("HEAD FLICK") {
+                      Config.headFlick = !Config.headFlick
+                      render()
+                  })
+                  col.addView(small("MAS SENSIBLE +") { adjust(1) })
+                  col.addView(small("MENOS -") { adjust(-1) })
+                  col.addView(small("CERRAR PANEL") { stopSelf() })
+
+                  val params = WindowManager.LayoutParams(
+                      dp(104),
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      else
+                          WindowManager.LayoutParams.TYPE_PHONE,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = dp(8)
+                      y = dp(140)
+                  }
+
+                  var dx = 0f
+                  var dy = 0f
+                  head.setOnTouchListener { _, ev ->
+                      when (ev.actionMasked) {
+                          MotionEvent.ACTION_DOWN -> {
+                              dx = ev.rawX - params.x
+                              dy = ev.rawY - params.y
+                              true
+                          }
+                          MotionEvent.ACTION_MOVE -> {
+                              params.x = (ev.rawX - dx).toInt()
+                              params.y = (ev.rawY - dy).toInt()
+                              try {
+                                  wm?.updateViewLayout(panel, params)
+                              } catch (e: Exception) {
+                              }
+                              true
+                          }
+                          else -> true
+                      }
+                  }
+
+                  panel = col
+                  try {
+                      wm?.addView(col, params)
+                  } catch (e: Exception) {
+                  }
+                  render()
+              }
+
+              private fun small(label: String, action: () -> Unit): TextView {
+                  return TextView(this).apply {
+                      text = label
+                      setTextColor(Color.WHITE)
+                      textSize = 11f
+                      gravity = Gravity.CENTER
+                      setPadding(0, dp(7), 0, dp(7))
+                      setBackgroundColor(0xFF23232E.toInt())
+                      setOnClickListener { action() }
+                  }
+              }
+
+              private fun adjust(dir: Int) {
+                  Config.redMin = Config.redMin - (8 * dir)
+                  Config.minPixels = Config.minPixels - dir
+                  render()
+              }
+
+              private fun render() {
+                  val st = when {
+                      !Config.enabled -> "EN PAUSA"
+                      TouchAccessibilityService.ready() -> "ACTIVO"
+                      else -> "FALTA ACCESIBILIDAD"
+                  }
+                  val hf = if (Config.headFlick) "HEAD ${Config.flickPx}px" else "HEAD off"
+                  state.text = "$st\nrojo ${Config.redMin} · ${Config.minPixels}px\nzona ${Config.regionHalf}\ncadencia ${Config.fireIntervalMs}ms\n$hf"
+              }
+
+              companion object {
+                  @Volatile
+                  private var running = false
+
+                  fun isShowing(): Boolean = running
+
+                  fun show(ctx: Context) {
+                      if (!Settings.canDrawOverlays(ctx)) return
+                      running = true
+                      ctx.startService(Intent(ctx, OverlayService::class.java))
+                  }
+
+                  fun hide(ctx: Context) {
+                      running = false
+                      ctx.stopService(Intent(ctx, OverlayService::class.java))
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/MainActivity.kt <<'EOF'
+          package com.fftool
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.media.projection.MediaProjectionManager
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.ContextCompat
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var status: TextView
+              private lateinit var startBtn: Button
+              private val ui = Handler(Looper.getMainLooper())
+
+              private val refresh = object : Runnable {
+                  override fun run() {
+                      render()
+                      ui.postDelayed(this, 800)
+                  }
+              }
+
+              private val projLauncher =
+                  registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+                      if (r.resultCode == Activity.RESULT_OK && r.data != null) {
+                          CaptureService.start(this, r.resultCode, r.data!!)
+                          OverlayService.show(this)
+                          toast("PRO MAX activo. Abre Free Fire.")
+                      } else {
+                          toast("Permiso de captura denegado")
+                      }
+                      render()
+                  }
+
+              private val notifLauncher =
+                  registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  Config.init(this)
+                  setContentView(buildUi())
+                  askNotifications()
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  ui.removeCallbacks(refresh)
+                  ui.post(refresh)
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  ui.removeCallbacks(refresh)
+              }
+
+              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+              private fun lp(matchW: Boolean = false, h: Int = -2, top: Int = 0, bottom: Int = 0): LinearLayout.LayoutParams {
+                  val params = LinearLayout.LayoutParams(
+                      if (matchW) LinearLayout.LayoutParams.MATCH_PARENT else LinearLayout.LayoutParams.WRAP_CONTENT,
+                      h
+                  )
+                  params.topMargin = top
+                  params.bottomMargin = bottom
+                  return params
+              }
+
+              private fun stepButton(label: String, action: () -> Unit): Button {
+                  return Button(this).apply {
+                      text = label
+                      textSize = 14f
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(0xFF23232E.toInt())
+                      gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                      setOnClickListener { action() }
+                  }
+              }
+
+              private fun buildUi(): ScrollView {
+                  val col = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(dp(20), dp(32), dp(20), dp(32))
+                      setBackgroundColor(0xFF0E0E12.toInt())
+                  }
+
+                  col.addView(TextView(this).apply {
+                      text = "FF PRO MAX"
+                      setTextColor(0xFFFF3B30.toInt())
+                      textSize = 32f
+                      typeface = Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                  }, lp(matchW = true, h = dp(50)))
+
+                  col.addView(TextView(this).apply {
+                      text = "Trigger bot anti ban + herramientas de carpeta\nDetecta el rojo del centro y dispara por accesibilidad"
+                      setTextColor(0xFFAAAAAA.toInt())
+                      textSize = 13f
+                      gravity = Gravity.CENTER
+                      setPadding(0, 0, 0, dp(18))
+                  })
+
+                  status = TextView(this).apply {
+                      setTextColor(Color.WHITE)
+                      textSize = 13f
+                      setLineSpacing(dp(5).toFloat(), 1f)
+                      setPadding(dp(14), dp(14), dp(14), dp(14))
+                      setBackgroundColor(0xFF1A1A22.toInt())
+                  }
+                  col.addView(status, lp(matchW = true, bottom = dp(16)))
+
+                  col.addView(stepButton("1 · Permitir superposición") {
+                      startActivity(
+                          Intent(
+                              Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                              Uri.parse("package:$packageName")
+                          )
+                      )
+                  })
+                  col.addView(stepButton("2 · Activar servicio de accesibilidad") {
+                      startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                  })
+                  col.addView(stepButton("3 · Mostrar / ocultar panel flotante") {
+                      if (OverlayService.isShowing()) OverlayService.hide(this) else OverlayService.show(this)
+                  })
+                  col.addView(stepButton("4 · Archivos del juego (carpeta de Free Fire)") {
+                      startActivity(Intent(this@MainActivity, FolderActivity::class.java))
+                  })
+
+                  startBtn = Button(this).apply {
+                      text = "INICIAR PRO MAX"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(0xFFC81E28.toInt())
+                      setOnClickListener { requestCapture() }
+                  }
+                  col.addView(startBtn, lp(matchW = true, h = dp(56), top = dp(16), bottom = dp(10)))
+
+                  col.addView(Button(this).apply {
+                      text = "MODO PEGAR DURO"
+                      textSize = 16f
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(0xFFB00020.toInt())
+                      setOnClickListener {
+                          Config.presetDuro()
+                          toast("Modo agresivo: cadencia 22ms, flick 300px")
+                          render()
+                      }
+                  }, lp(matchW = true, h = dp(52), bottom = dp(10)))
+
+                  col.addView(Button(this).apply {
+                      text = "DETENER"
+                      textSize = 15f
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(0xFF33333D.toInt())
+                      setOnClickListener {
+                          CaptureService.stop(this@MainActivity)
+                          OverlayService.hide(this@MainActivity)
+                          Config.enabled = false
+                          toast("Detenido")
+                          render()
+                      }
+                  }, lp(matchW = true, h = dp(50)))
+
+                  col.addView(TextView(this).apply {
+                      text = "Abre PRO MAX primero y luego Free Fire. Arrastra el panel por el titulo para moverlo fuera del centro, si no tapa el punto rojo."
+                      setTextColor(0xFF777788.toInt())
+                      textSize = 12f
+                      setPadding(0, dp(18), 0, 0)
+                  })
+
+                  return ScrollView(this).apply { addView(col) }
+              }
+
+              private fun render() {
+                  val ov = if (Settings.canDrawOverlays(this)) "OK" else "FALTA"
+                  val ac = if (TouchAccessibilityService.ready()) "OK" else "FALTA"
+                  val cap = if (Config.enabled) "ACTIVO" else "PAUSA"
+                  status.text = "Superposición: $ov\nAccesibilidad: $ac\nEstado: $cap\n\nrojo ${Config.redMin} · ${Config.minPixels}px · zona ${Config.regionHalf}\ncadencia ${Config.fireIntervalMs}ms · tap ${Config.tapMs}ms\n${if (Config.headFlick) "HeadFlick ON ${Config.flickPx}px" else "HeadFlick OFF"}"
+                  startBtn.isEnabled = true
+              }
+
+              private fun canOverlay(): Boolean = Settings.canDrawOverlays(this)
+
+              private fun requestCapture() {
+                  if (!canOverlay()) {
+                      toast("Primero permite la superposición (paso 1)")
+                      return
+                  }
+                  if (!TouchAccessibilityService.ready()) {
+                      toast("Primero activa la accesibilidad (paso 2)")
+                      return
+                  }
+                  val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                  projLauncher.launch(mpm.createScreenCaptureIntent())
+              }
+
+              private fun askNotifications() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                          != PackageManager.PERMISSION_GRANTED
+                      ) {
+                          notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                      }
+                  }
+              }
+
+              private fun toast(msg: String) {
+                  Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/fftool/FolderActivity.java <<'EOF'
+          package com.fftool;
+
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import androidx.annotation.Nullable;
+          import androidx.appcompat.app.AppCompatActivity;
+          import androidx.documentfile.provider.DocumentFile;
+
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+
+          public class FolderActivity extends AppCompatActivity {
+
+              private static final String PREF = "cfg";
+              private static final String K_DIR = "dir";
+              private static final int PICK_TREE = 101;
+
+              private SharedPreferences sp;
+              private EditText dirField;
+              private TextView log;
+
+              @Override
+              protected void onCreate(@Nullable Bundle b) {
+                  super.onCreate(b);
+                  sp = getSharedPreferences(PREF, MODE_PRIVATE);
+
+                  ScrollView sc = new ScrollView(this);
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setPadding(dp(18), dp(28), dp(18), dp(28));
+                  col.setBackgroundColor(0xFF0E0E12);
+                  sc.addView(col);
+                  setContentView(sc);
+
+                  TextView title = new TextView(this);
+                  title.setText("ARCHIVOS DEL JUEGO");
+                  title.setTextColor(0xFFFF3B30);
+                  title.setTextSize(22f);
+                  title.setGravity(Gravity.CENTER);
+                  col.addView(title);
+
+                  TextView info = new TextView(this);
+                  info.setText("Copia los archivos que pusiste en assets/ff hacia la carpeta del juego. Tambien puedes elegir la carpeta con el selector (recomendado en Android 11+).");
+                  info.setTextColor(0xFFAAAAAA);
+                  info.setTextSize(12f);
+                  col.addView(info);
+
+                  dirField = new EditText(this);
+                  dirField.setHint("/storage/emulated/0/Android/data/com.dts.freefireth/files/");
+                  dirField.setTextColor(Color.WHITE);
+                  dirField.setHintTextColor(0xFF777788);
+                  dirField.setText(sp.getString(K_DIR, ""));
+                  col.addView(dirField);
+
+                  col.addView(btn("Copiar a la ruta escrita", v -> copiarAManual()));
+                  col.addView(btn("Elegir carpeta del juego (selector)", v -> elegirCarpeta()));
+                  col.addView(btn("Backup de lo que hay en la carpeta", v -> backup()));
+                  col.addView(btn("Usar ruta de Free Fire", v -> {
+                      dirField.setText("/storage/emulated/0/Android/data/com.dts.freefireth/files/");
+                  }));
+                  col.addView(btn("Usar ruta de Free Fire MAX", v -> {
+                      dirField.setText("/storage/emulated/0/Android/data/com.dts.freefiremax/files/");
+                  }));
+
+                  log = new TextView(this);
+                  log.setTextColor(0xFF7CFC9A);
+                  log.setTextSize(12f);
+                  log.setPadding(0, dp(14), 0, 0);
+                  col.addView(log);
+
+                  log("Listo. Archivos en assets/ff: " + contarAssets());
+              }
+
+              private int dp(int v) {
+                  return (int) (v * getResources().getDisplayMetrics().density);
+              }
+
+              private Button btn(String label, android.view.View.OnClickListener l) {
+                  Button b = new Button(this);
+                  b.setText(label);
+                  b.setTextSize(13f);
+                  b.setTextColor(Color.WHITE);
+                  b.setBackgroundColor(0xFF23232E);
+                  b.setOnClickListener(l);
+                  return b;
+              }
+
+              private void log(String s) {
+                  log.append(s + "\n");
+              }
+
+              private int contarAssets() {
+                  try {
+                      String[] l = getAssets().list("ff");
+                      return l == null ? 0 : l.length;
+                  } catch (Exception e) {
+                      return 0;
+                  }
+              }
+
+              private void copiarAManual() {
+                  String d = dirField.getText().toString().trim();
+                  if (d.isEmpty()) {
+                      toast("Escribe una ruta");
+                      return;
+                  }
+                  sp.edit().putString(K_DIR, d).apply();
+                  File dest = new File(d);
+                  if (!dest.exists() && !dest.mkdirs()) {
+                      toast("No se pudo crear la carpeta");
+                      log("Error: no se pudo crear " + d);
+                      return;
+                  }
+                  try {
+                      int n = copiarAssets(new File(dest, "ff"));
+                      log("Copiados " + n + " archivos en " + dest.getAbsolutePath());
+                      toast("Listo");
+                  } catch (Exception e) {
+                      log("Error: " + e.getMessage());
+                      toast("Error al copiar");
+                  }
+              }
+
+              private int copiarAssets(File destDir) throws Exception {
+                  if (!destDir.exists()) destDir.mkdirs();
+                  String[] list = getAssets().list("ff");
+                  int total = 0;
+                  if (list == null) return 0;
+                  for (String name : list) {
+                      String[] sub = getAssets().list("ff/" + name);
+                      if (sub != null && sub.length > 0) {
+                          File subDir = new File(destDir, name);
+                          if (!subDir.exists()) subDir.mkdirs();
+                          for (String s : sub) {
+                              total += copiarArchivo("ff/" + name + "/" + s, new File(subDir, s));
+                          }
+                      } else {
+                          total += copiarArchivo("ff/" + name, new File(destDir, name));
+                      }
+                  }
+                  return total;
+              }
+
+              private int copiarArchivo(String asset, File out) {
+                  try (InputStream in = getAssets().open(asset);
+                       OutputStream os = new FileOutputStream(out)) {
+                      byte[] buf = new byte[8192];
+                      int r;
+                      while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+                      return 1;
+                  } catch (Exception e) {
+                      log("Fallo " + asset + ": " + e.getMessage());
+                      return 0;
+                  }
+              }
+
+              private void elegirCarpeta() {
+                  Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                          | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                          | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                  startActivityForResult(i, PICK_TREE);
+              }
+
+              @Override
+              protected void onActivityResult(int req, int res, @Nullable Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if (req != PICK_TREE || res != RESULT_OK || data == null || data.getData() == null) return;
+                  Uri tree = data.getData();
+                  try {
+                      getContentResolver().takePersistableUriPermission(
+                              tree,
+                              Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                      );
+                  } catch (Exception ignored) {
+                  }
+                  try {
+                      DocumentFile root = DocumentFile.fromTreeUri(this, tree);
+                      if (root == null) return;
+                      DocumentFile ff = root.findFile("ff");
+                      if (ff == null || !ff.isDirectory()) ff = root.createDirectory("ff");
+                      if (ff == null) {
+                          toast("No se pudo crear la carpeta ff");
+                          return;
+                      }
+                      String[] list = getAssets().list("ff");
+                      int total = 0;
+                      if (list != null) {
+                          for (String name : list) {
+                              total += copiarAssetSAF(ff, "ff/" + name, name);
+                          }
+                      }
+                      log("Copiados " + total + " archivos via selector en " + root.getName() + "/ff");
+                      toast("Listo");
+                  } catch (Exception e) {
+                      log("Error: " + e.getMessage());
+                  }
+              }
+
+              private int copiarAssetSAF(DocumentFile dir, String asset, String name) {
+                  try {
+                      String[] sub = getAssets().list(asset);
+                      if (sub != null && sub.length > 0) {
+                          DocumentFile d = dir.findFile(name);
+                          if (d == null || !d.isDirectory()) d = dir.createDirectory(name);
+                          int t = 0;
+                          for (String s : sub) {
+                              if (d != null) t += copiarAssetSAF(d, asset + "/" + s, s);
+                          }
+                          return t;
+                      }
+                      DocumentFile out = dir.findFile(name);
+                      if (out == null) out = dir.createFile("application/octet-stream", name);
+                      if (out == null) return 0;
+                      try (InputStream in = getAssets().open(asset);
+                           OutputStream os = getContentResolver().openOutputStream(out.getUri(), "wt")) {
+                          if (os == null) return 0;
+                          byte[] buf = new byte[8192];
+                          int r;
+                          while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+                      }
+                      return 1;
+                  } catch (Exception e) {
+                      log("Fallo " + asset + ": " + e.getMessage());
+                      return 0;
+                  }
+              }
+
+              private void backup() {
+                  String d = dirField.getText().toString().trim();
+                  if (d.isEmpty()) {
+                      toast("Escribe una ruta primero");
+                      return;
+                  }
+                  File src = new File(d, "ff");
+                  if (!src.exists()) {
+                      toast("No hay carpeta ff ahi");
+                      return;
+                  }
+                  File dst = new File(getExternalFilesDir(null), "backup_ff");
+                  if (dst.exists()) {
+                      File[] old = dst.listFiles();
+                      if (old != null) for (File f : old) f.delete();
+                  }
+                  dst.mkdirs();
+                  File[] files = src.listFiles();
+                  int n = 0;
+                  if (files != null) {
+                      for (File f : files) {
+                          if (f.isFile()) {
+                              try (InputStream in = new java.io.FileInputStream(f);
+                                   OutputStream os = new FileOutputStream(new File(dst, f.getName()))) {
+                                  byte[] buf = new byte[8192];
+                                  int r;
+                                  while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+                                  n++;
+                              } catch (Exception e) {
+                                  log("Fallo backup " + f.getName());
+                              }
+                          }
+                      }
+                  }
+                  log("Backup de " + n + " archivos en " + dst.getAbsolutePath());
+                  toast("Backup listo");
+              }
+
+              private void toast(String s) {
+                  Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+              }
+          }
+          EOF
 
       - name: Compilar APK
         run: |
           set +e
-          cd /tmp/p
-          gradle assembleDebug --stacktrace > /tmp/build.log 2>&1
-          code=$?
+          gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1
+          CODE=$?
           set -e
-          echo "############ CABECERA DEL ERROR ############"
-          head -n 120 /tmp/build.log
-          echo "############ FIN DE LA CABECERA ############"
-          exit $code
+          echo "########## INICIO DEL LOG ##########"
+          head -n 200 /tmp/build.log
+          echo "########## FIN DEL LOG ##########"
+          exit $CODE
 
       - name: Subir APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ff-folder-tool-apk
-          path: /tmp/p/app/build/outputs/apk/debug/app-debug.apk
+          name: FF-PRO-MAX-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+
+      - name: Publicar APK en Releases
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk FF-PRO-MAX.apk
+          if gh release view v3 > /dev/null 2>&1; then
+            gh release upload v3 FF-PRO-MAX.apk --clobber
+          else
+            gh release create v3 FF-PRO-MAX.apk --title "FF PRO MAX 3.0" --notes "APK compilado automaticamente. Instala y activa accesibilidad + superposicion."
+          fi
