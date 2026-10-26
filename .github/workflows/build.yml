@@ -2,7 +2,6 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -17,9 +16,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Gradle 8.7 fijo
         run: |
           curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/g.zip
@@ -28,7 +24,9 @@ jobs:
 
       - name: Diagnostico
         run: |
-          gradle --version
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
           echo "=== ARCHIVOS DEL REPO ==="
           ls -R
 
