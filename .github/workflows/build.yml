@@ -22,30 +22,38 @@ jobs:
           unzip -q /tmp/g.zip -d $HOME
           echo "$HOME/gradle-8.7/bin" >> $GITHUB_PATH
 
-      - name: Diagnostico
+      - name: Reacomodar proyecto
         run: |
-          echo "=== GRADLE ==="
-          which gradle
-          gradle --version
-          echo "=== ANDROID_HOME ==="
-          echo "$ANDROID_HOME"
-          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
-          echo "=== ARBOL DEL REPO ==="
-          ls -R
-          echo "=== ARCHIVOS CLAVE ==="
-          for f in settings.gradle.kts build.gradle.kts gradle.properties app/build.gradle.kts app/src/main/AndroidManifest.xml; do
-            echo "----- $f -----"
-            cat "$f" 2>/dev/null || echo "NO EXISTE"
-          done
+          set -e
+          rm -rf /tmp/p
+          mkdir -p /tmp/p
+          cp -r ".github/workflows/app" /tmp/p/app
+          cp .github/workflows/build.gradle.kts /tmp/p/
+          cp .github/workflows/settings.gradle.kts /tmp/p/
+          cp .github/workflows/gradle.properties /tmp/p/
+
+          # el java quedo doblemente anidado, lo subimos a su lugar
+          mkdir -p /tmp/p/app/src/main/java/com/fftool
+          mv /tmp/p/app/src/main/app/src/main/java/com/fftool/MainActivity.java \
+             /tmp/p/app/src/main/java/com/fftool/MainActivity.java
+          rm -rf /tmp/p/app/src/main/app
+
+          # los assets viven en la raiz, van dentro del modulo
+          mkdir -p /tmp/p/app/src/main/assets/ff
+          cp app/src/main/assets/ff/* /tmp/p/app/src/main/assets/ff/ 2>/dev/null || true
+
+          echo "=== estructura final ==="
+          find /tmp/p -type f | sort
 
       - name: Compilar APK
         run: |
           set +e
+          cd /tmp/p
           gradle assembleDebug --stacktrace > /tmp/build.log 2>&1
           code=$?
           set -e
           echo "############ CABECERA DEL ERROR ############"
-          head -n 80 /tmp/build.log
+          head -n 120 /tmp/build.log
           echo "############ FIN DE LA CABECERA ############"
           exit $code
 
@@ -53,4 +61,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ff-folder-tool-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: /tmp/p/app/build/outputs/apk/debug/app-debug.apk
